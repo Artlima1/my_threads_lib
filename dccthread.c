@@ -4,10 +4,6 @@
 
 /* --------------------------------------- Macros ----------------------------------------------------------- */
 
-#define MAX_THREADS 10
-// #define USE_THREADS_LINKED_LIST
-#define USE_THREADS_ARRAY
-
 /* --------------------------------------- Type Definitions ------------------------------------------------- */
 
 typedef struct {
@@ -17,16 +13,19 @@ typedef struct {
 	int param;
 } dccthread_t;
 
+typedef struct {
+	dccthread_t data;
+	struct thread_node_t * next;
+} thread_node_t;
+
 /* --------------------------------------- Local Variables -------------------------------------------------- */
 
 static dccthread_t manager_thread;
+static dccthread_t * running_thread;
 
-#ifdef USE_THREADS_ARRAY
-static dccthread_t threads_list[MAX_THREADS];
 static int num_of_threads = 0;
-/* I'm assuming the manager selects the next thread from the list every time, instead of sorting the list and picking the first */
-static int current_thread_index;
-#endif
+static thread_node_t * head_thread;
+static thread_node_t * tail_thread;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 
@@ -53,22 +52,34 @@ void dccthread_init(void (*func)(int), int param) {
 /* TODO - Part 1 */
 dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) {
 	/* Create the thread */
+	thread_node_t * new_node = (thread_node_t *) malloc(sizeof(thread_node_t));
+	dccthread_t * new_thread = &new_node->data;
+
+	/* TODO - Initialize thread context */
+
 	/* Add thread to the end of threads list */
-	/* num_of_threads++ */
+	tail_thread->next = new_node;
+	tail_thread = new_node;
+	num_of_threads++;
 }
 
 /* TODO - Part 1 */
 void dccthread_yield(void) {
-	/* End current thread context */
-	/* Remove current thread from threads list, shifting left the rest of the list (if array) */
-	/* num_of_threads-- */
+	/* TODO - End current thread context */
+
+	/* Remove current thread from threads list */
+	thread_node_t * temp = head_thread;
+	head_thread = head_thread->next;
+	free(temp);
+	num_of_threads--;
+
 	/* Swap context with manager_thread */
+	/* Set running_thread to manager */
 }
 
 /* Part 1 */
 dccthread_t * dccthread_self(void) {
-	/* Return current_thread */
-	return &threads_list[current_thread_index];
+	return running_thread;
 }
 
 /* Part 1 */
@@ -98,5 +109,6 @@ static void scheduler(int param){
 		exit(1);
 	}
 
-	/* swap context with threads_list[0] (for now) */
+	/* swap context with head_thread (for now) */
+	/* Set running thread to head_thread */
 }
