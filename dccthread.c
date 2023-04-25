@@ -1,22 +1,26 @@
 /* --------------------------------------- Includes --------------------------------------------------------- */
-#include "dccthread.h"
 #include <ucontext.h>
+#include <stdlib.h>
+#include <string.h>
+#include "dccthread.h"
 
 /* --------------------------------------- Macros ----------------------------------------------------------- */
 
 /* --------------------------------------- Type Definitions ------------------------------------------------- */
 
-typedef struct {
+struct dccthread_t{
 	char name[DCCTHREAD_MAX_NAME_SIZE];
 	ucontext_t context;
 	void (*func)(int);
 	int param;
-} dccthread_t;
+};
 
-typedef struct {
+typedef struct thread_node_t thread_node_t;
+
+struct thread_node_t {
 	dccthread_t data;
 	struct thread_node_t * next;
-} thread_node_t;
+};
 
 /* --------------------------------------- Local Variables -------------------------------------------------- */
 
@@ -29,7 +33,7 @@ static thread_node_t * tail_thread;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 
-static void scheduler(int param);
+void scheduler(int param);
 
 void dccthread_init(void (*func)(int), int param);
 dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param);
@@ -42,11 +46,22 @@ const char * dccthread_name(dccthread_t *tid);
 
 /* --------------------------------------- External Function Implementation ---------------------------------- */
 
+// Allows the file to be compiled and linked standalone. Can be taken out for the final version
+// int main(int argc, char** argv) {
+// 	return 0;
+// }
+
 /* TODO - Part 1 */
 void dccthread_init(void (*func)(int), int param) {
-	/* Create manager thread */
+	/* Acquire manager thread */
+	getcontext(&manager_thread.context);
+
 	/* Create main thread */
+	dccthread_t * main_thread = dccthread_create("Main", (void*)&func, param);
+	
 	/* Run main thread */
+	swapcontext(&manager_thread.context, &main_thread->context);
+	exit(0);
 }
 
 /* TODO - Part 1 */
@@ -54,13 +69,27 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) 
 	/* Create the thread */
 	thread_node_t * new_node = (thread_node_t *) malloc(sizeof(thread_node_t));
 	dccthread_t * new_thread = &new_node->data;
+	strcpy(new_thread->name, name);
 
-	/* TODO - Initialize thread context */
+	/* Initialize thread context */
+	getcontext(&new_thread->context);
+	new_thread->context.uc_link = &manager_thread.context;
+	new_thread->context.uc_stack.ss_sp = malloc(THREAD_STACK_SIZE);
+	new_thread->context.uc_stack.ss_size = THREAD_STACK_SIZE;
+	new_thread->context.uc_stack.ss_flags = 0;
+
+	makecontext(&new_thread->context, (void*)&func, 1, param);
 
 	/* Add thread to the end of threads list */
-	tail_thread->next = new_node;
-	tail_thread = new_node;
+	if(num_of_threads > 0) {
+		tail_thread->next = new_node;
+		tail_thread = new_node;
+	} else {
+		head_thread = new_node;
+		tail_thread = new_node;
+	}
 	num_of_threads++;
+	return new_thread;
 }
 
 /* TODO - Part 1 */
@@ -104,7 +133,7 @@ void dccthread_sleep(struct timespec ts) {
 
 /* --------------------------------------- Internal Function Implementation ---------------------------------- */
 
-static void scheduler(int param){
+void scheduler(int param){
 	if(num_of_threads==0){
 		exit(1);
 	}

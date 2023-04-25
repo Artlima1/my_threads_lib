@@ -2,11 +2,12 @@
 #define __DCCTHREAD_HEADER__
 
 #include <time.h>
-
-typedef struct dccthread dccthread_t;
+#include <ucontext.h>
 
 #define DCCTHREAD_MAX_NAME_SIZE 256
 #define THREAD_STACK_SIZE (1<<16)
+
+typedef struct dccthread_t dccthread_t;
 
 /* `dccthread_init` initializes any state necessary for the
  * threadling library and starts running `func`.  this function
