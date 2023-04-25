@@ -55,9 +55,9 @@ const char * dccthread_name(dccthread_t *tid);
 void dccthread_init(void (*func)(int), int param) {
 	/* Acquire manager thread */
 	getcontext(&manager_thread.context);
-
+	
 	/* Create main thread */
-	dccthread_t * main_thread = dccthread_create("Main", (void*)&func, param);
+	dccthread_t * main_thread = dccthread_create("main", (void*)func, param);
 	
 	/* Run main thread */
 	swapcontext(&manager_thread.context, &main_thread->context);
@@ -78,7 +78,7 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) 
 	new_thread->context.uc_stack.ss_size = THREAD_STACK_SIZE;
 	new_thread->context.uc_stack.ss_flags = 0;
 
-	makecontext(&new_thread->context, (void*)&func, 1, param);
+	makecontext(&new_thread->context, (void*)func, 1, param);
 
 	/* Add thread to the end of threads list */
 	if(num_of_threads > 0) {
