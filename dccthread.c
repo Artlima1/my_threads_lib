@@ -5,10 +5,12 @@
 #include "dccthread.h"
 
 /* --------------------------------------- Macros ----------------------------------------------------------- */
+#define REG_RIP 16
 
 /* --------------------------------------- Type Definitions ------------------------------------------------- */
 
-struct dccthread_t{
+struct dccthread_t
+{
 	char name[DCCTHREAD_MAX_NAME_SIZE];
 	ucontext_t context;
 	void (*func)(int);
@@ -17,32 +19,34 @@ struct dccthread_t{
 
 typedef struct thread_node_t thread_node_t;
 
-struct thread_node_t {
+struct thread_node_t
+{
 	dccthread_t data;
-	struct thread_node_t * next;
+	struct thread_node_t *next;
 };
 
 /* --------------------------------------- Local Variables -------------------------------------------------- */
 
 static dccthread_t manager_thread;
-static dccthread_t * running_thread;
+static dccthread_t *running_thread;
 
 static int num_of_threads = 0;
-static thread_node_t * head_thread;
-static thread_node_t * tail_thread;
+static int thread_ended = 1;
+static thread_node_t *head_thread;
+static thread_node_t *tail_thread;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 
-void scheduler(int param);
+static void scheduler();
 
 void dccthread_init(void (*func)(int), int param);
-dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param);
+dccthread_t *dccthread_create(const char *name, void (*func)(int), int param);
 void dccthread_yield(void);
 void dccthread_exit(void);
 void dccthread_wait(dccthread_t *tid);
 void dccthread_sleep(struct timespec ts);
-dccthread_t * dccthread_self(void);
-const char * dccthread_name(dccthread_t *tid);
+dccthread_t *dccthread_self(void);
+const char *dccthread_name(dccthread_t *tid);
 
 /* --------------------------------------- External Function Implementation ---------------------------------- */
 
@@ -51,24 +55,32 @@ const char * dccthread_name(dccthread_t *tid);
 // 	return 0;
 // }
 
-/* TODO - Part 1 */
-void dccthread_init(void (*func)(int), int param) {
+/* Part 1 */
+void dccthread_init(void (*func)(int), int param)
+{
 	/* Acquire manager thread */
 	getcontext(&manager_thread.context);
-	
+
 	/* Create main thread */
-	dccthread_t * main_thread = dccthread_create("main", (void*)func, param);
-	
+	dccthread_t *main_thread = dccthread_create("main", func, param);
+
 	/* Run main thread */
+	running_thread = main_thread;
 	swapcontext(&manager_thread.context, &main_thread->context);
+	while (1)
+	{
+		running_thread = &manager_thread;
+		scheduler();
+	}
 	exit(0);
 }
 
-/* TODO - Part 1 */
-dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) {
+/* Part 1 */
+dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
+{
 	/* Create the thread */
-	thread_node_t * new_node = (thread_node_t *) malloc(sizeof(thread_node_t));
-	dccthread_t * new_thread = &new_node->data;
+	thread_node_t *new_node = (thread_node_t *)malloc(sizeof(thread_node_t));
+	dccthread_t *new_thread = &new_node->data;
 	strcpy(new_thread->name, name);
 
 	/* Initialize thread context */
@@ -78,13 +90,16 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) 
 	new_thread->context.uc_stack.ss_size = THREAD_STACK_SIZE;
 	new_thread->context.uc_stack.ss_flags = 0;
 
-	makecontext(&new_thread->context, (void*)func, 1, param);
+	makecontext(&new_thread->context, (void *)func, 1, param);
 
 	/* Add thread to the end of threads list */
-	if(num_of_threads > 0) {
+	if (num_of_threads > 0)
+	{
 		tail_thread->next = new_node;
 		tail_thread = new_node;
-	} else {
+	}
+	else
+	{
 		head_thread = new_node;
 		tail_thread = new_node;
 	}
@@ -93,51 +108,74 @@ dccthread_t * dccthread_create(const char *name, void (*func)(int ), int param) 
 }
 
 /* TODO - Part 1 */
-void dccthread_yield(void) {
-	/* TODO - End current thread context */
+void dccthread_yield(void)
+{
+	/* Send executing thread to the end of the list */
+	thread_node_t *new_node = (thread_node_t *)malloc(sizeof(thread_node_t));
+	tail_thread->next = new_node;
+	new_node->data = *running_thread;
+	new_node->next = NULL;
+	tail_thread = new_node;
 
-	/* Remove current thread from threads list */
-	thread_node_t * temp = head_thread;
-	head_thread = head_thread->next;
-	free(temp);
-	num_of_threads--;
-
-	/* Swap context with manager_thread */
-	/* Set running_thread to manager */
+	/* Give control to the scheduler thread, indicating that the thread should be requeued */
+	thread_ended = 0;
+	swapcontext(&tail_thread->data.context, &manager_thread.context);
 }
 
 /* Part 1 */
-dccthread_t * dccthread_self(void) {
+dccthread_t *dccthread_self(void)
+{
 	return running_thread;
 }
 
 /* Part 1 */
-const char * dccthread_name(dccthread_t *tid) {
+const char *dccthread_name(dccthread_t *tid)
+{
 	return tid->name;
 }
 
 /* TODO - Part 2 */
-void dccthread_exit(void) {
+void dccthread_exit(void)
+{
 	return;
 }
 
 /* TODO - Part 2 */
-void dccthread_wait(dccthread_t *tid) {
+void dccthread_wait(dccthread_t *tid)
+{
 	return;
 }
 
 /* TODO - Part 5*/
-void dccthread_sleep(struct timespec ts) {
+void dccthread_sleep(struct timespec ts)
+{
 	return;
 }
 
 /* --------------------------------------- Internal Function Implementation ---------------------------------- */
 
-void scheduler(int param){
-	if(num_of_threads==0){
+static void scheduler()
+{
+	/* Check if there are any threads left to execute */
+	if (thread_ended == 1)
+		num_of_threads--;
+	if (num_of_threads == 0)
 		exit(1);
+
+	if (thread_ended == 1) {
+		/* If a thread has ended, pop it */
+		thread_node_t *prev_head = head_thread;
+		head_thread = head_thread->next;
+		free(prev_head);
+	} else {
+		/* If no thread ended, requeue the head thread */
+		tail_thread->next = head_thread;
+		head_thread = head_thread->next;
+		tail_thread->next = NULL;
+		thread_ended = 1;
 	}
 
-	/* swap context with head_thread (for now) */
-	/* Set running thread to head_thread */
+	/* Change the context to the next thread on the queue */
+	running_thread = &head_thread->data;
+	swapcontext(&manager_thread.context, &running_thread->context);
 }
