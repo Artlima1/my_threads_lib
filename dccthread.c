@@ -29,6 +29,7 @@ enum {
 	LAST_OP_RUN,
 	LAST_OP_YIELD,
 	LAST_OP_EXIT,
+	LAST_OP_WAIT,
 };
 
 typedef struct thread_node_t thread_node_t;
@@ -37,6 +38,9 @@ struct thread_node_t
 {
 	dccthread_t * thread;
 	struct thread_node_t *next;
+	union info {
+		dccthread_t * waiting_for;
+	} line_info;
 };
 
 typedef struct
@@ -52,13 +56,15 @@ typedef struct
 static dccthread_t manager_thread;
 static dccthread_t *running_thread;
 
-static thread_line_t ready_line = {0, NULL, NULL};
+static thread_line_t ready_line;
+static thread_line_t wait_line;
 
 static int last_op;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 
 static void scheduler();
+static void check_waiting_line(dccthread_t *tid);
 
 void dccthread_init(void (*func)(int), int param);
 dccthread_t *dccthread_create(const char *name, void (*func)(int), int param);
@@ -71,15 +77,10 @@ const char *dccthread_name(dccthread_t *tid);
 
 /* --------------------------------------- External Function Implementation ---------------------------------- */
 
-// Allows the file to be compiled and linked standalone. Can be taken out for the final version
-// int main(int argc, char** argv) {
-// 	return 0;
-// }
-
 #ifdef PRINT_DEBUG
-void print_list(){
-	printf("DCCTHREAD: list() - ");
-	thread_node_t * it = ready_line.head;
+void print_list(int lid, thread_line_t * list){
+	printf("DCCTHREAD: list() - %d ", lid);
+	thread_node_t * it = list->head;
 	while(it != NULL){
 		printf("%p -> ", it->thread);
 		it = it->next;
@@ -92,19 +93,19 @@ void print_list(){
 void dccthread_init(void (*func)(int), int param)
 {
 
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: init() - Init, manager %p\n", &manager_thread);
-#endif
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: init() - manager %p\n", &manager_thread);
+	#endif
+
+	/* Initialize Structures */
+	memset(&ready_line, 0, sizeof(thread_line_t));
+	memset(&wait_line, 0, sizeof(thread_line_t));
 
 	/* Acquire manager thread */
 	getcontext(&manager_thread.context);
 
 	/* Create main thread */
 	dccthread_t *main_thread = dccthread_create("main", func, param);
-
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: init() - main_thread %p\n", main_thread);
-#endif
 
 	/* Run main thread */
 	running_thread = main_thread;
@@ -113,11 +114,6 @@ void dccthread_init(void (*func)(int), int param)
 
 	while (1)
 	{
-
-#ifdef PRINT_DEBUG
-		printf("DCCTHREAD: init() - back at while(1) (running %p), call scheduler\n", running_thread);
-#endif
-
 		running_thread = &manager_thread;
 		scheduler();
 	}
@@ -154,9 +150,9 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 	}
 	ready_line.len++;
 
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: create() - created %s (%p), running %p \n", name, (new_node->thread), running_thread);
-#endif
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: create() - created %p (%s)\n", (new_node->thread), name);
+	#endif
 
 	return new_node->thread;
 }
@@ -172,9 +168,9 @@ void dccthread_yield(void)
 	curr->next = NULL;
 
 
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: yield() - %p yielded, moved to %p \n", curr->thread, ready_line.tail->thread);
-#endif
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: yield() - %p yielded \n", curr->thread);
+	#endif
 
 	/* Signal yield and go back to manager */
 	last_op = LAST_OP_YIELD;
@@ -194,17 +190,81 @@ const char *dccthread_name(dccthread_t *tid)
 	return tid->name;
 }
 
-/* TODO - Part 2 */
+/* Part 2 */
 void dccthread_exit(void)
 {
+
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: exit() - thread %p exited\n", running_thread);
+	#endif
+
 	last_op = LAST_OP_EXIT;
 	running_thread = &manager_thread;
 	swapcontext(&(ready_line.head->thread->context), &manager_thread.context);
 }
 
-/* TODO - Part 2 */
+/* Part 2 */
 void dccthread_wait(dccthread_t *tid)
 {
+
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: wait() - thread %p will wait for %p\n", running_thread, tid);
+	#endif
+
+	/* check if tid exists */
+	int exist = 0;
+	thread_node_t * it;
+	if(ready_line.len > 1){
+		it = ready_line.head;
+		while(it != NULL){
+			if(it->thread == tid){
+				exist = 1;
+				break;
+			}
+			it = it->next;
+		}
+	}
+	if(!exist && (wait_line.len > 0)){
+		it = wait_line.head;
+		while(it != NULL){
+			if(it->thread == tid){
+				exist = 1;
+				break;
+			}
+		it = it->next;
+		}
+	}
+	if(!exist){
+		return;
+	}
+
+
+	/* Remove from ready line */
+	thread_node_t * curr = ready_line.head;
+	ready_line.head = ready_line.head->next;
+	ready_line.len--;
+
+	/* Add to wait line */
+	curr->line_info.waiting_for = tid;
+	if (wait_line.len > 0)
+	{
+		wait_line.tail->next = curr;
+		wait_line.tail = curr;
+		wait_line.tail->next = NULL;
+	}
+	else
+	{
+		wait_line.head = curr;
+		wait_line.tail = curr;
+		wait_line.tail->next = NULL;
+	}
+	wait_line.len++;
+
+	/* Signal wait and go back to manager */
+	last_op = LAST_OP_WAIT;
+	running_thread = &manager_thread;
+	swapcontext(&(curr->thread->context), &manager_thread.context);
+
 	return;
 }
 
@@ -219,15 +279,20 @@ void dccthread_sleep(struct timespec ts)
 static void scheduler()
 {
 
-#ifdef PRINT_DEBUG
-	print_list();
-#endif
+	#ifdef PRINT_DEBUG
+		print_list(1, &ready_line);
+		print_list(2, &wait_line);
+	#endif
 
 	/* Running thread ended or exited */
 	if((last_op == LAST_OP_RUN) || (last_op == LAST_OP_EXIT)){
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: scheduler() - thread %p ended, %d left\n", running_thread, ready_line.len-1);
-#endif
+
+		check_waiting_line(ready_line.head->thread);
+
+		#ifdef PRINT_DEBUG
+			printf("DCCTHREAD: scheduler() - thread %p ended or exited, %d left\n", ready_line.head->thread, ready_line.len-1);
+		#endif
+
 		thread_node_t *prev_head = ready_line.head;
 		ready_line.head = ready_line.head->next;
 		free(prev_head);
@@ -236,9 +301,9 @@ static void scheduler()
 		}
 	}
 
-#ifdef PRINT_DEBUG
-	printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, ready_line.head->thread);
-#endif
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, ready_line.head->thread);
+	#endif
 
 	/* Change the context to the next thread on the queue */
 	last_op = LAST_OP_RUN;
@@ -246,4 +311,47 @@ static void scheduler()
 	swapcontext(&manager_thread.context, &running_thread->context);
 }
 
+static void check_waiting_line(dccthread_t *tid){
+	if(wait_line.len == 0){
+		return;
+	}
 
+	thread_node_t * it = wait_line.head;
+	thread_node_t * prev = NULL;
+	while(it != NULL){
+		if(it->line_info.waiting_for == tid){
+			break;
+		}
+		prev = it;
+		it = it->next;
+	}
+
+	if(it != NULL){
+
+		#ifdef PRINT_DEBUG
+			printf("DCCTHREAD: check_waiting_line() - %p was waiting for %p\n", it->thread, tid);
+		#endif
+
+		/* Remove from wait line */
+		if(wait_line.len == 1){ /* Only one in wait line */
+			wait_line.head = NULL;
+			wait_line.tail = NULL;
+		}
+		else {
+			if(prev == NULL){ /* It is the head of the list */
+				wait_line.head = it->next;
+			}
+			else{
+				prev->next = it->next;
+			}
+		}
+		wait_line.len--;
+
+		it->line_info.waiting_for = NULL;
+
+		ready_line.tail->next = it;
+		ready_line.tail = it;
+		ready_line.tail->next = NULL;
+		ready_line.len++;
+	}
+}
