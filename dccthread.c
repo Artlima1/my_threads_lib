@@ -8,7 +8,7 @@
 /* --------------------------------------- Macros ----------------------------------------------------------- */
 #define REG_RIP 16
 
-#define PRINT_DEBUG
+// #define PRINT_DEBUG
 
 /* --------------------------------------- Type Definitions ------------------------------------------------- */
 
@@ -20,11 +20,21 @@ struct dccthread_t
 	int param;
 };
 
+typedef enum {
+	false,
+	true
+} bool;
+
+enum {
+	LAST_OP_RUN,
+	LAST_OP_YIELD,
+};
+
 typedef struct thread_node_t thread_node_t;
 
 struct thread_node_t
 {
-	dccthread_t data;
+	dccthread_t * thread;
 	struct thread_node_t *next;
 };
 
@@ -34,9 +44,10 @@ static dccthread_t manager_thread;
 static dccthread_t *running_thread;
 
 static int num_of_threads = 0;
-static int thread_ended = 1;
 static thread_node_t *head_thread;
 static thread_node_t *tail_thread;
+
+static int last_op;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 
@@ -60,10 +71,10 @@ const char *dccthread_name(dccthread_t *tid);
 
 #ifdef PRINT_DEBUG
 void print_list(){
-	printf("DCCTHREAD(64): list() - ");
+	printf("DCCTHREAD: list() - ");
 	thread_node_t * it = head_thread;
 	while(it != NULL){
-		printf("%p -> ", &it->data);
+		printf("%p -> ", it->thread);
 		it = it->next;
 	}
 	printf("\n");
@@ -75,7 +86,7 @@ void dccthread_init(void (*func)(int), int param)
 {
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD(64): init() - Init, manager %p\n", &manager_thread);
+	printf("DCCTHREAD: init() - Init, manager %p\n", &manager_thread);
 #endif
 
 	/* Acquire manager thread */
@@ -85,18 +96,19 @@ void dccthread_init(void (*func)(int), int param)
 	dccthread_t *main_thread = dccthread_create("main", func, param);
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD(70): init() - main_thread %p\n", main_thread);
+	printf("DCCTHREAD: init() - main_thread %p\n", main_thread);
 #endif
 
 	/* Run main thread */
 	running_thread = main_thread;
+	last_op = LAST_OP_RUN;
 	swapcontext(&manager_thread.context, &main_thread->context);
 
 	while (1)
 	{
 
 #ifdef PRINT_DEBUG
-		printf("DCCTHREAD(85): init() - back at while(1) (running %p), call scheduler\n", running_thread);
+		printf("DCCTHREAD: init() - back at while(1) (running %p), call scheduler\n", running_thread);
 #endif
 
 		running_thread = &manager_thread;
@@ -109,18 +121,18 @@ void dccthread_init(void (*func)(int), int param)
 dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 {
 	/* Create the thread */
-	thread_node_t *new_node = (thread_node_t *)malloc(sizeof(thread_node_t));
-	dccthread_t *new_thread = &new_node->data;
-	strcpy(new_thread->name, name);
+	thread_node_t * new_node = (thread_node_t *) malloc(sizeof(thread_node_t));
+	new_node->thread = (dccthread_t *) malloc(sizeof(dccthread_t));
+	strcpy(new_node->thread->name, name);
 
 	/* Initialize thread context */
-	getcontext(&new_thread->context);
-	new_thread->context.uc_link = &manager_thread.context;
-	new_thread->context.uc_stack.ss_sp = malloc(THREAD_STACK_SIZE);
-	new_thread->context.uc_stack.ss_size = THREAD_STACK_SIZE;
-	new_thread->context.uc_stack.ss_flags = 0;
+	getcontext(&new_node->thread->context);
+	new_node->thread->context.uc_link = &manager_thread.context;
+	new_node->thread->context.uc_stack.ss_sp = malloc(THREAD_STACK_SIZE);
+	new_node->thread->context.uc_stack.ss_size = THREAD_STACK_SIZE;
+	new_node->thread->context.uc_stack.ss_flags = 0;
 
-	makecontext(&new_thread->context, (void *)func, 1, param);
+	makecontext(&new_node->thread->context, (void *)func, 1, param);
 
 	/* Add thread to the end of threads list */
 	if (num_of_threads > 0)
@@ -136,30 +148,31 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 	num_of_threads++;
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD(124): create() - created %s (%p), running %p\n", name, new_thread, running_thread);
+	printf("DCCTHREAD: create() - created %s (%p), running %p \n", name, (new_node->thread), running_thread);
 #endif
 
-	return new_thread;
+	return new_node->thread;
 }
 
 /* TODO - Part 1 */
 void dccthread_yield(void)
 {
 	/* Send executing thread to the end of the list */
-	thread_node_t *new_node = (thread_node_t *)malloc(sizeof(thread_node_t));
-	tail_thread->next = new_node;
-	new_node->data = *running_thread;
-	new_node->next = NULL;
-	tail_thread = new_node;
+	thread_node_t *curr = head_thread;
+	tail_thread->next = curr;
+	tail_thread = curr;
+	head_thread = (curr->next) ? (curr->next) : curr;
+	curr->next = NULL;
 
-	/* Give control to the scheduler thread, indicating that the thread should be requeued */
-	thread_ended = 0;
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD(142): yield() - %p yielded, moved to %p \n", running_thread, &new_node->data);
+	printf("DCCTHREAD: yield() - %p yielded, moved to %p \n", curr->thread, tail_thread->thread);
 #endif
 
-	swapcontext(&tail_thread->data.context, &manager_thread.context);
+	/* Signal yield and go back to manager */
+	last_op = LAST_OP_YIELD;
+	running_thread = &manager_thread;
+	swapcontext(&(curr->thread->context), &manager_thread.context);
 }
 
 /* Part 1 */
@@ -201,41 +214,26 @@ static void scheduler()
 	print_list();
 #endif
 
-	/* Check if there are any threads left to execute */
-	if (thread_ended == 1)
-		num_of_threads--;
-	if (num_of_threads == 0)
-		exit(1);
-
-	if (thread_ended == 1) {
-
+	/* Running thread ended */
+	if(last_op == LAST_OP_RUN){
 #ifdef PRINT_DEBUG
-		printf("DCCTHREAD(193): scheduler() - %p ended, running %p\n", &head_thread->data, running_thread);
+	printf("DCCTHREAD: scheduler() - thread %p ended, %d left\n", running_thread, num_of_threads-1);
 #endif
-
-		/* If a thread has ended, pop it */
 		thread_node_t *prev_head = head_thread;
 		head_thread = head_thread->next;
 		free(prev_head);
-	} else {
-
-#ifdef PRINT_DEBUG
-		printf("DCCTHREAD(201): scheduler() - %p yielded, running %p\n", &head_thread->data, running_thread);
-#endif
-
-		/* If no thread ended, requeue the head thread */
-		tail_thread->next = head_thread;
-		head_thread = head_thread->next;
-		tail_thread->next = NULL;
-		thread_ended = 1;
+		if(--num_of_threads == 0){
+			exit(1);
+		}
 	}
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD(207): scheduler() - changing from %p to %p\n", running_thread, &head_thread->data);
+	printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, head_thread->thread);
 #endif
 
 	/* Change the context to the next thread on the queue */
-	running_thread = &head_thread->data;
+	last_op = LAST_OP_RUN;
+	running_thread = head_thread->thread;
 	swapcontext(&manager_thread.context, &running_thread->context);
 }
 
