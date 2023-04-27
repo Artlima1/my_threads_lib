@@ -28,6 +28,7 @@ typedef enum {
 enum {
 	LAST_OP_RUN,
 	LAST_OP_YIELD,
+	LAST_OP_EXIT,
 };
 
 typedef struct thread_node_t thread_node_t;
@@ -38,14 +39,20 @@ struct thread_node_t
 	struct thread_node_t *next;
 };
 
+typedef struct
+{
+	int len;
+ 	thread_node_t *head;
+ 	thread_node_t *tail;
+} thread_line_t;
+
+
 /* --------------------------------------- Local Variables -------------------------------------------------- */
 
 static dccthread_t manager_thread;
 static dccthread_t *running_thread;
 
-static int num_of_threads = 0;
-static thread_node_t *head_thread;
-static thread_node_t *tail_thread;
+static thread_line_t ready_line = {0, NULL, NULL};
 
 static int last_op;
 
@@ -72,7 +79,7 @@ const char *dccthread_name(dccthread_t *tid);
 #ifdef PRINT_DEBUG
 void print_list(){
 	printf("DCCTHREAD: list() - ");
-	thread_node_t * it = head_thread;
+	thread_node_t * it = ready_line.head;
 	while(it != NULL){
 		printf("%p -> ", it->thread);
 		it = it->next;
@@ -135,17 +142,17 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 	makecontext(&new_node->thread->context, (void *)func, 1, param);
 
 	/* Add thread to the end of threads list */
-	if (num_of_threads > 0)
+	if (ready_line.len > 0)
 	{
-		tail_thread->next = new_node;
-		tail_thread = new_node;
+		ready_line.tail->next = new_node;
+		ready_line.tail = new_node;
 	}
 	else
 	{
-		head_thread = new_node;
-		tail_thread = new_node;
+		ready_line.head = new_node;
+		ready_line.tail = new_node;
 	}
-	num_of_threads++;
+	ready_line.len++;
 
 #ifdef PRINT_DEBUG
 	printf("DCCTHREAD: create() - created %s (%p), running %p \n", name, (new_node->thread), running_thread);
@@ -158,15 +165,15 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 void dccthread_yield(void)
 {
 	/* Send executing thread to the end of the list */
-	thread_node_t *curr = head_thread;
-	tail_thread->next = curr;
-	tail_thread = curr;
-	head_thread = (curr->next) ? (curr->next) : curr;
+	thread_node_t *curr = ready_line.head;
+	ready_line.tail->next = curr;
+	ready_line.tail = curr;
+	ready_line.head = (curr->next) ? (curr->next) : curr;
 	curr->next = NULL;
 
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD: yield() - %p yielded, moved to %p \n", curr->thread, tail_thread->thread);
+	printf("DCCTHREAD: yield() - %p yielded, moved to %p \n", curr->thread, ready_line.tail->thread);
 #endif
 
 	/* Signal yield and go back to manager */
@@ -190,7 +197,9 @@ const char *dccthread_name(dccthread_t *tid)
 /* TODO - Part 2 */
 void dccthread_exit(void)
 {
-	return;
+	last_op = LAST_OP_EXIT;
+	running_thread = &manager_thread;
+	swapcontext(&(ready_line.head->thread->context), &manager_thread.context);
 }
 
 /* TODO - Part 2 */
@@ -214,26 +223,26 @@ static void scheduler()
 	print_list();
 #endif
 
-	/* Running thread ended */
-	if(last_op == LAST_OP_RUN){
+	/* Running thread ended or exited */
+	if((last_op == LAST_OP_RUN) || (last_op == LAST_OP_EXIT)){
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD: scheduler() - thread %p ended, %d left\n", running_thread, num_of_threads-1);
+	printf("DCCTHREAD: scheduler() - thread %p ended, %d left\n", running_thread, ready_line.len-1);
 #endif
-		thread_node_t *prev_head = head_thread;
-		head_thread = head_thread->next;
+		thread_node_t *prev_head = ready_line.head;
+		ready_line.head = ready_line.head->next;
 		free(prev_head);
-		if(--num_of_threads == 0){
+		if(--ready_line.len == 0){
 			exit(1);
 		}
 	}
 
 #ifdef PRINT_DEBUG
-	printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, head_thread->thread);
+	printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, ready_line.head->thread);
 #endif
 
 	/* Change the context to the next thread on the queue */
 	last_op = LAST_OP_RUN;
-	running_thread = head_thread->thread;
+	running_thread = ready_line.head->thread;
 	swapcontext(&manager_thread.context, &running_thread->context);
 }
 
