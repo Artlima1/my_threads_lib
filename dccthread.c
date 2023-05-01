@@ -3,10 +3,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/time.h>
 #include "dccthread.h"
 
 /* --------------------------------------- Macros ----------------------------------------------------------- */
 #define REG_RIP 16
+#define TIMER_INTERVAL 10 // ms
 
 // #define PRINT_DEBUG
 
@@ -61,10 +65,14 @@ static thread_line_t wait_line;
 
 static int last_op;
 
+sigset_t sig_set;
+
 /* --------------------------------------- Function Declaration --------------------------------------------- */
+static void setup_timer();
 
 static void scheduler();
 static void check_waiting_line(dccthread_t *tid);
+static void timer_handler(int sig, siginfo_t *si, void *uc);
 
 void dccthread_init(void (*func)(int), int param);
 dccthread_t *dccthread_create(const char *name, void (*func)(int), int param);
@@ -106,6 +114,9 @@ void dccthread_init(void (*func)(int), int param)
 
 	/* Create main thread */
 	dccthread_t *main_thread = dccthread_create("main", func, param);
+
+	/* Setup the timer */
+	setup_timer();
 
 	/* Run main thread */
 	running_thread = main_thread;
@@ -157,7 +168,7 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 	return new_node->thread;
 }
 
-/* TODO - Part 1 */
+/* Part 1 */
 void dccthread_yield(void)
 {
 	/* Send executing thread to the end of the list */
@@ -354,4 +365,66 @@ static void check_waiting_line(dccthread_t *tid){
 		ready_line.tail->next = NULL;
 		ready_line.len++;
 	}
+}
+
+static void timer_handler(int sig, siginfo_t *si, void *uc){
+	#ifdef PRINT_DEBUG
+		printf("DCCTHREAD: timer_handler()\n");
+	#endif
+	if((running_thread != &manager_thread) && (ready_line.len>1)){
+		dccthread_yield();
+	}
+}
+
+static void setup_timer(){
+	int res = 0;
+	timer_t timerId = 0;
+
+    struct sigevent sev = {0};
+    int data = 0;
+
+    /* specifies the action when receiving a signal */
+    struct sigaction sa = {0};
+
+    /* specify start delay and interval */
+    struct itimerspec its = {.it_value.tv_sec = 0,
+                             .it_value.tv_nsec = TIMER_INTERVAL * 10E6,
+                             .it_interval.tv_sec = 0,
+                             .it_interval.tv_nsec = TIMER_INTERVAL * 10E6};
+
+    sev.sigev_notify = SIGEV_SIGNAL; // Linux-specific
+    sev.sigev_signo = SIGRTMIN;
+    sev.sigev_value.sival_ptr = &data;
+
+    /* create timer */
+    res = timer_create(CLOCK_PROCESS_CPUTIME_ID, &sev, &timerId);
+
+    if (res != 0)
+    {
+        printf("Error timer_create\n");
+        exit(-1);
+    }
+
+    /* specifz signal and handler */
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = timer_handler;
+
+    /* Initialize signal */
+    sigemptyset(&sa.sa_mask);
+
+    /* Register signal handler */
+    if (sigaction(SIGRTMIN, &sa, NULL) == -1)
+    {
+        printf("Error sigaction\n");
+        exit(-1);
+    }
+
+    /* start timer */
+    res = timer_settime(timerId, 0, &its, NULL);
+
+    if (res != 0)
+    {
+        printf("Error timer_settime\n");
+        exit(-1);
+    }
 }
