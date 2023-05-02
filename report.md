@@ -20,6 +20,10 @@ do grupo no desenvolvimento do trabalho (os valores devem somar
 3. Referências bibliográficas
 * http://nitish712.blogspot.com/2012/10/thread-library-using-context-switching.html
 * https://linux.die.net/man/3/swapcontext
+* https://man7.org/linux/man-pages/man2/timer_create.2.html
+* https://www.ibm.com/docs/en/i/7.3?topic=ssw_ibm_i_73/apis/sigaset.html
+* https://www.ibm.com/docs/en/zos/2.3.0?topic=descriptions-sigaction
+
 
 4. Estruturas de dados  
     1. Descreva e justifique as estruturas de dados utilizadas para
