@@ -65,7 +65,8 @@ static thread_line_t wait_line;
 
 static int last_op;
 
-sigset_t sig_set;
+static struct sigaction sa = {0};
+static sigset_t aux_sigset;
 
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 static void setup_timer();
@@ -171,6 +172,9 @@ dccthread_t *dccthread_create(const char *name, void (*func)(int), int param)
 /* Part 1 */
 void dccthread_yield(void)
 {
+	sigprocmask(SIG_BLOCK, &sa.sa_mask, &aux_sigset);
+	sa.sa_mask = aux_sigset;
+
 	/* Send executing thread to the end of the list */
 	thread_node_t *curr = ready_line.head;
 	ready_line.tail->next = curr;
@@ -204,6 +208,8 @@ const char *dccthread_name(dccthread_t *tid)
 /* Part 2 */
 void dccthread_exit(void)
 {
+	sigprocmask(SIG_BLOCK, &sa.sa_mask, &aux_sigset);
+	sa.sa_mask = aux_sigset;
 
 	#ifdef PRINT_DEBUG
 		printf("DCCTHREAD: exit() - thread %p exited\n", running_thread);
@@ -217,6 +223,8 @@ void dccthread_exit(void)
 /* Part 2 */
 void dccthread_wait(dccthread_t *tid)
 {
+	sigprocmask(SIG_BLOCK, &sa.sa_mask, &aux_sigset);
+	sa.sa_mask = aux_sigset;
 
 	#ifdef PRINT_DEBUG
 		printf("DCCTHREAD: wait() - thread %p will wait for %p\n", running_thread, tid);
@@ -316,6 +324,8 @@ static void scheduler()
 		printf("DCCTHREAD: scheduler() - changing from %p to %p\n", running_thread, ready_line.head->thread);
 	#endif
 
+	sigprocmask(SIG_SETMASK, &sa.sa_mask, NULL);
+
 	/* Change the context to the next thread on the queue */
 	last_op = LAST_OP_RUN;
 	running_thread = ready_line.head->thread;
@@ -371,7 +381,7 @@ static void timer_handler(int sig, siginfo_t *si, void *uc){
 	#ifdef PRINT_DEBUG
 		printf("DCCTHREAD: timer_handler()\n");
 	#endif
-	if((running_thread != &manager_thread) && (ready_line.len>1)){
+	if((running_thread != &manager_thread) && (ready_line.len>=1)){
 		dccthread_yield();
 	}
 }
@@ -382,9 +392,6 @@ static void setup_timer(){
 
     struct sigevent sev = {0};
     int data = 0;
-
-    /* specifies the action when receiving a signal */
-    struct sigaction sa = {0};
 
     /* specify start delay and interval */
     struct itimerspec its = {.it_value.tv_sec = 0,
