@@ -68,6 +68,14 @@ static int last_op;
 static struct sigaction sa = {0};
 static sigset_t aux_sigset;
 
+timer_t preemption_tmr_id = 0;
+struct itimerspec preemption_tmr_specs = {
+	.it_value.tv_sec = 0,
+	.it_value.tv_nsec = TIMER_INTERVAL * 10E6,
+	.it_interval.tv_sec = 0,
+	.it_interval.tv_nsec = TIMER_INTERVAL * 10E6
+};
+
 /* --------------------------------------- Function Declaration --------------------------------------------- */
 static void setup_timer();
 
@@ -325,6 +333,7 @@ static void scheduler()
 	#endif
 
 	sigprocmask(SIG_SETMASK, &sa.sa_mask, NULL);
+	timer_settime(preemption_tmr_id, 0, &preemption_tmr_specs, NULL);
 
 	/* Change the context to the next thread on the queue */
 	last_op = LAST_OP_RUN;
@@ -388,23 +397,14 @@ static void timer_handler(int sig, siginfo_t *si, void *uc){
 
 static void setup_timer(){
 	int res = 0;
-	timer_t timerId = 0;
 
     struct sigevent sev = {0};
-    int data = 0;
-
-    /* specify start delay and interval */
-    struct itimerspec its = {.it_value.tv_sec = 0,
-                             .it_value.tv_nsec = TIMER_INTERVAL * 10E6,
-                             .it_interval.tv_sec = 0,
-                             .it_interval.tv_nsec = TIMER_INTERVAL * 10E6};
 
     sev.sigev_notify = SIGEV_SIGNAL; // Linux-specific
     sev.sigev_signo = SIGRTMIN;
-    sev.sigev_value.sival_ptr = &data;
 
     /* create timer */
-    res = timer_create(CLOCK_PROCESS_CPUTIME_ID, &sev, &timerId);
+    res = timer_create(CLOCK_PROCESS_CPUTIME_ID, &sev, &preemption_tmr_id);
 
     if (res != 0)
     {
@@ -427,7 +427,7 @@ static void setup_timer(){
     }
 
     /* start timer */
-    res = timer_settime(timerId, 0, &its, NULL);
+    res = timer_settime(preemption_tmr_id, 0, &preemption_tmr_specs, NULL);
 
     if (res != 0)
     {
