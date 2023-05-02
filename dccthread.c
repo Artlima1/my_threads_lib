@@ -9,7 +9,6 @@
 #include "dccthread.h"
 
 /* --------------------------------------- Macros ----------------------------------------------------------- */
-#define REG_RIP 16
 #define TIMER_INTERVAL 10 // ms
 
 // #define PRINT_DEBUG
