@@ -1,30 +1,40 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <assert.h>
 #include "dccthread.h"
 
-void test2(int cnt)
-{
+void tsleep(int seconds) {
 	dccthread_t *self = dccthread_self();
-	while(cnt > 0) {
-		printf("LOCALTEST: test2() - thread %s count %d\n", dccthread_name(self), cnt);
-		cnt--;
-		dccthread_yield();
-	}
+	struct timespec ts;
+	ts.tv_sec = seconds;
+	ts.tv_nsec = 0;
+	dccthread_sleep(ts);
+	printf("thread %s woke up and exiting\n", dccthread_name(self));
+	dccthread_exit();
 }
 
-void test1(int cnt)
-{
-	dccthread_t *self = dccthread_self();
-	dccthread_create("test2", test2, cnt-1);
-	while(cnt > 0) {
-		printf("LOCALTEST: test1() - thread %s count %d\n", dccthread_name(self), cnt);
-		cnt--;
-		dccthread_yield();
+void test(int cnt) {
+	int i;
+	dccthread_t **threads = calloc(cnt, sizeof(*threads));
+	assert(threads);
+	for(i = 0; i < cnt; i++) {
+		char name[16];
+		sprintf(name, "sleep%d", i);
+		threads[i] = dccthread_create(name, tsleep, i+1);
 	}
+	for(i = 0; i < cnt*2; i++) {
+		dccthread_yield();
+		printf("thread main running\n");
+	}
+	for(i = 0; i < cnt; i++) {
+		dccthread_wait(threads[i]);
+	}
+	printf("main thread exiting\n");
+	dccthread_exit();
 }
 
 int main(int argc, char **argv)
 {
-	dccthread_init(test1, 5);
+	dccthread_init(test, 5);
 }
 

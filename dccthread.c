@@ -314,7 +314,7 @@ void dccthread_wait(dccthread_t *tid)
 	return;
 }
 
-/* TODO - Part 5*/
+/* Part 5*/
 void dccthread_sleep(struct timespec ts)
 {
 	/* Block signal */
